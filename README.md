@@ -19,15 +19,15 @@ coprocessor interface. No modifications to the PicoRV32 core are required.
 
 
 ## Repository Layout
-
+```txt
 helix-soc/
 │
 ├── README.md                  ← Project overview, what Helix is
-├── LICENSE                    ← Your choice (MIT/Apache-2.0 recommended)
+├── LICENSE                    ← MIT
 ├── CHANGELOG.md               ← Version history
 │
 ├── docs/
-│   ├── helix_vec_isa_spec.md  ← Your ISA spec (already written, just move it)
+│   ├── helix_vec_isa_spec.md  ← ISA spec 
 │   ├── abi.md                 ← Calling conventions, caller-saved rules
 │   ├── memory_map.md          ← Address space, vector vs scalar port
 │   └── timing.md              ← Cycle counts, PCPI handshake diagram
@@ -38,30 +38,31 @@ helix-soc/
 │   ├── helix_vec_alu.sv
 │   ├── helix_vec_lsu.sv
 │   ├── helix_vcop.sv
-│   └── helix_picosoc.v        ← Your top-level SoC
+│   └── helix_picosoc.v        ← top-level SoC
 │
 ├── third_party/
 │   └── picorv32/
-│       ├── picorv32.v         ← Vendored verbatim, DO NOT MODIFY
+│       ├── picorv32.v         ← Vendored verbatim
 │       ├── simpleuart.v
 │       ├── spimemio.v
 │       └── COMMIT             ← Plain text file with the upstream commit hash
 │
 ├── sw/
 │   ├── include/
-│   │   └── helix_vec_asm.h    ← Your assembler header
+│   │   └── helix_vec_asm.h    ← assembler header
 │   ├── examples/
-│   │   └── fir16/             ← The FIR example from the spec
+│   │   └── fir16/             ← FIR example from the spec
 │   └── linker/
 │       └── helix.ld           ← Linker script
 │
 ├── sim/
-│   ├── tb_helix_vcop.sv       ← Your coprocessor testbench (write this next)
+│   ├── tb_helix_vcop.sv       ← coprocessor testbench 
 │   ├── tb_helix_vec_alu.sv    ← ALU unit testbench
 │   └── Makefile
 │
 └── syn/
-    └── constraints.xdc        ← If targeting a specific FPGA
+    └── constraints.xdc        ← for targeting a specific FPGA (not decided yet)
+```
 
 ## Documentation
 
