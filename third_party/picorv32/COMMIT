@@ -1,0 +1,43 @@
+```txt
+Third-Party Component: PicoRV32
+================================
+
+Project:
+https://github.com/YosysHQ/picorv32
+
+Upstream Repository:
+https://github.com/YosysHQ/picorv32
+
+Integrated Commit:
+87c89acc18994c8cf9a2311e871818e87d304568
+
+License:
+ISC License
+
+Integration Method:
+Vendored directly into third_party/picorv32/
+without modification.
+
+Files Included:
+- picorv32.v
+- simpleuart.v
+- spimemio.v
+
+Purpose in HelixSoC:
+Provides the scalar RV32IM-compatible processor core
+used as the host CPU for the Helix Vector Extension (HVX).
+
+Modification Status:
+No changes made to upstream RTL sources.
+
+Reproducibility:
+To reproduce the exact integrated version:
+
+git clone https://github.com/YosysHQ/picorv32
+git checkout 4b3f2e1
+
+Notes:
+- PicoRV32 remains entirely upstream-compatible.
+- Helix integrates through the PCPI interface only.
+- No modifications to PicoRV32 decode or execution pipeline.
+```
