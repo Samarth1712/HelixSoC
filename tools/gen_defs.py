@@ -23,7 +23,7 @@ ADDING A NEW CONSTANT:
 ADDING A NEW INSTRUCTION:
   1. Add op_id constant(s) to CONSTANTS.
   2. Add a row to FIELD_MACROS_SVH if a new field extraction is needed.
-  3. Add the encoding to HVX_INSN_EXAMPLES for documentation.
+  3. Update the encoding examples in helix_vec_isa.md Section 7 and 11.
   4. Regenerate.
 """
 
