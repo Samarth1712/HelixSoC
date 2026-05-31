@@ -189,8 +189,8 @@ correction in scalar code after accumulation.
 | Element width | Single VMAC max contribution | ACCX capacity |
 |---|---|---|
 | int8  | 16 × 127 × 127 = 258,064 | 2⁶³ − 1 ≈ safe for ~35 trillion calls |
-| int16 | 8 × 32767² ≈ 8.6×10⁹ | Safe for ~1 billion calls |
-| int32 | 4 × (2³¹−1)² ≈ 1.84×10¹⁹ | ~2 calls before risk; use `VGETACC` periodically |
+| int16 | 8 × 32767² ≈ 8.59×10⁹ | Safe for ~1 billion calls |
+| int32 | 4 × (2³¹−1)² ≈ 1.84×10¹⁹ | **As few as 1 call can overflow** — 1.84×10¹⁹ > 2⁶³−1 ≈ 9.22×10¹⁸; call `VGETACC` every iteration |
 
 #### `VGETACC  rd, rs2`
 - **op_id:** `00010`  **ew:** `00` (canonical)
@@ -303,37 +303,37 @@ Format: [31:27]op_id [26:25]ew [24:23]00 [22:20]vs2 [19:18]00
 VLD.128  Q0, [a0]
   op_id=00000 ew=00 vs2=000 vs1=000 f3=010 vd=000
   → 0000_0_00_00_000_00_000_010_00_000_0101011
-  → 0x0000_002B
+  → 0x0000_202B  (f3=010=LOAD contributes bits[14:12]=0x2000)
 
 VST.128  [a0], Q1
   op_id=00000 ew=00 vs2=001 vs1=000 f3=011 vd=000
   → 0000_0_00_00_001_00_000_011_00_000_0101011
-  → 0x0010_032B
+  → 0x0010_302B  (vs2=001 at bits[22:20], f3=011=STORE)
 
 VADD.S8  Q2, Q0, Q1
   op_id=00000 ew=00 vs2=001 vs1=000 f3=000 vd=010
   → 0000_0_00_00_001_00_000_000_00_010_0101011
-  → 0x0010_0152B  (note: vd=010 → bits[9:7])
+  → 0x0010_012B  (vs2=001, f3=000=ARITH, vd=010)
 
 VMAC.S8  Q0, Q1
   op_id=00000 ew=00 vs2=001 vs1=000 f3=100 vd=000
   → 0000_0_00_00_001_00_000_100_00_000_0101011
-  → 0x0010_002B  (f3=100)
+  → 0x0010_402B  (f3=100=MAC contributes bits[14:12]=0x4000)
 
 VCLRACC
   op_id=00001 ew=00 vs2=000 vs1=000 f3=100 vd=000
   → 0000_1_00_00_000_00_000_100_00_000_0101011
-  → 0x0800_002B  (op_id bit[27]=1)
+  → 0x0800_402B  (op_id bit[27]=1, f3=100=MAC)
 
 VGETACC  x0, x2  (rd=x0, shift_reg=x2)
   op_id=00010 ew=00 vs2=010 vs1=000 f3=100 vd=000
   → 0001_0_00_00_010_00_000_100_00_000_0101011
-  → 0x1010_002B  (op_id[29]=1, vs2=010)
+  → 0x1020_402B  (op_id[29]=1, vs2=010, f3=100=MAC)
 
 VMOVS.S8 Q5, a0  (broadcast a0[7:0] to all lanes)
   op_id=00000 ew=00 vs2=000 vs1=000 f3=101 vd=101
   → 0000_0_00_00_000_00_000_101_00_101_0101011
-  → 0x0000_02EB  (f3=101, vd=101)
+  → 0x0000_52AB  (f3=101=MISC contributes 0x5000, vd=101 contributes 0xA80)
 ```
 
 ---
@@ -357,8 +357,10 @@ VMOVS.S8 Q5, a0  (broadcast a0[7:0] to all lanes)
 // There is no callee-save convention — the callee owns all Q-registers.
 
 void outer(void) {
-    int32_t saved_q0[4];    // 128 bits = 4 × int32
-    int32_t saved_q1[4];
+    // MUST be 16-byte aligned — VLD/VST mask lower 4 address bits,
+    // so a 4-byte-aligned buffer would silently access the wrong location.
+    int32_t saved_q0[4] __attribute__((aligned(16)));
+    int32_t saved_q1[4] __attribute__((aligned(16)));
 
     // Save Q0, Q1 before calling inner()
     hvx_vst(0, saved_q0);   // VST Q0 → saved_q0
@@ -400,8 +402,10 @@ the PCPI handler in either case.
    require bias adjustment in software.
 4. **No float support** — int8/int16/int32 only. Use PicoRV32's scalar FPU
    (if enabled) for float.
-5. **ACCX overflow with int32 VMAC** — only ~2 VMAC calls safe before overflow.
-   Use `VGETACC` frequently or restructure as int16.
+5. **ACCX overflow with int32 VMAC** — a single worst-case VMAC.S32 call
+   (all 4 lanes at INT32_MAX × INT32_MAX) contributes ~1.84×10¹⁹, which
+   exceeds ACCX capacity (2⁶³−1 ≈ 9.22×10¹⁸). Call `VGETACC` every
+   iteration when using int32 VMAC, or restructure as int16.
 6. **No interrupt context save for Q-registers** — must be handled in software
    if ISR uses HVX.
 7. **`VGETACC` rd limited to x0–x7** — the 3-bit `vd` field restricts the
@@ -426,7 +430,11 @@ the PCPI handler in either case.
 // coeffs:  16-byte aligned, 16 int8 Q7 coefficients
 // returns: filtered output as int32 (Q7 scaled, shift=7 to get int8)
 int32_t fir16_s8(const int8_t *samples, const int8_t *coeffs) {
-    int32_t result;
+    // Explicit register constraint required: VGETACC encodes rd in the
+    // 3-bit vd field, limiting destination to x0-x7. t0=x5 is safe.
+    // Without this, GCC may allocate a0 (x10), causing the instruction
+    // to encode rd=x2 (sp) — silently corrupting the stack pointer.
+    register int32_t result asm("t0");
     hvx_vld(1, samples);       // Q1 = 16 input samples
     hvx_vld(2, coeffs);        // Q2 = 16 Q7 coefficients
     hvx_vclracc();              // ACCX = 0
@@ -447,6 +455,8 @@ multiply, accumulate × 16). **~7.6× speedup.**
 ---
 
 ## 11. Instruction Opcode Quick Reference
+
+Binary field layout. For computed 32-bit hex values see Section 7.
 
 ```
 Format: [31:27]op_id [26:25]ew [22:20]vs2 [17:15]vs1 [14:12]f3 [9:7]vd [6:0]=0x2B
