@@ -10,13 +10,17 @@ sees the following regions:
 | Base address | End address | Size | Region | Notes |
 |---|---|---|---|---|
 | `0x0000_0000` | `0x0000_03FF` | 1 KB | Internal SRAM | Default 256-word config |
-| `0x0010_0000` | `0x00FF_FFFF` | ~16 MB | SPI Flash XIP | Read-only, execute-in-place |
+| `0x0000_0400` | `0x01FF_FFFF` | ~32 MB | SPI Flash XIP | Read-only, execute-in-place; starts immediately after SRAM |
 | `0x0200_0000` | `0x0200_0000` | 4 bytes | SPI Flash config | spimemio control register |
 | `0x0200_0004` | `0x0200_0004` | 4 bytes | UART divisor | Baud rate setting |
 | `0x0200_0008` | `0x0200_0008` | 4 bytes | UART data | TX write / RX read |
 | `0x0200_0010` | `0x02FF_FFFF` | — | I/O (iomem) | External peripheral space |
 
-**Reset vector:** `0x0010_0000` (first word of SPI Flash XIP).
+**Reset vector:** `0x0010_0000` (within SPI Flash XIP region, 1 MB into flash).
+This is a conventional choice — the SPI flash controller requires some time to
+initialise before XIP is reliable. The actual flash decode starts at
+`4 × MEM_WORDS` = `0x0000_0400` (immediately after SRAM), but firmware is
+placed at `0x0010_0000` to avoid the SPI controller's startup window.
 
 **IRQ handler:** `0x0000_0000` (first word of SRAM).
 Place the IRQ handler at SRAM base or redirect with a jump instruction.
@@ -182,8 +186,8 @@ hvx_vld(0, coeffs_sram);                        // now safe to VLD
 
 ```
 CPU scalar bus view:
-  0x0000_0000 – 0x0000_03FF   SRAM     (ram_ready path)
-  0x0010_0000 – 0x01FF_FFFF   Flash XIP (spimem_ready path)
+  0x0000_0000 – 0x0000_03FF   SRAM        (ram_ready path, 4*MEM_WORDS bytes)
+  0x0000_0400 – 0x01FF_FFFF   Flash XIP   (spimem_ready path; starts at 4*MEM_WORDS)
   0x0200_0000                 SPI config
   0x0200_0004                 UART divisor
   0x0200_0008                 UART data
@@ -192,4 +196,9 @@ CPU scalar bus view:
 HVX vector port view:
   0x0000_0000 – 0x0000_03FF   SRAM only (16-byte aligned)
   all other addresses          SUPPRESSED (vec_mem_en gated)
+
+Note: Flash XIP decode is mem_addr >= 4*MEM_WORDS && mem_addr < 0x0200_0000.
+With default MEM_WORDS=256 this gives 0x400–0x1FFFFFFF. Firmware is
+conventionally placed at 0x0010_0000 (PROGADDR_RESET) to clear the SPI
+controller's startup window, not because flash only starts there.
 ```
