@@ -13,31 +13,31 @@
 //   Cycle 1 — vcop S_DECODE: lsu_req asserted (registered), lat_qa/qb latched
 //             LSU_IDLE: lsu_req not yet visible (registered signal, seen next cycle)
 //   Cycle 2 — LSU_IDLE: sees lsu_req, latches addr/wdata, moves to LSU_ACCESS
-//   Cycle 3 — LSU_ACCESS: drives vec_mem_en + addr/wdata to SRAM inputs
-//   Cycle 4 — LSU_WAIT: SRAM output valid, lsu_rdata captured; moves to LSU_DONE
-//   Cycle 5 — LSU_DONE: state register = LSU_DONE; lsu_done asserted
-//             COMBINATIONALLY from state decode (not registered).
-//             vcop S_LSU sees lsu_done=1 this same cycle, transitions to S_DONE.
+//   Cycle 3 — LSU_ACCESS: asserts vec_mem_en; SRAM latches addr on this edge
+//   Cycle 4 — LSU_WAIT: SRAM updates vec_mem_rdata via NBA at this edge.
+//             lsu_rdata NOT captured here — doing so would read the pre-update
+//             value because both the SRAM and LSU fire at the same posedge.
+//   Cycle 5 — LSU_LATCH: vec_mem_rdata is now stable (updated at cycle 4 NBA).
+//             lsu_rdata captured here — reads the post-cycle-4-NBA value.
+//             Transitions to LSU_DONE.
+//   Cycle 5 — LSU_DONE: lsu_done asserted COMBINATIONALLY from state decode.
+//             vcop S_LSU sees lsu_done=1 same cycle, transitions to S_DONE.
 //   Cycle 6 — vcop S_DONE: pcpi_ready asserted combinationally.
+//             Q register written with lsu_rdata.
 //
-// Total CPU stall: 6 cycles from S_IDLE entry.
+// Total CPU stall: 7 cycles from S_IDLE entry.
 //
-// ISA SPEC NOTE: Section 5 documents VLD/VST as 5 stall cycles. This is
-// incorrect — the correct count is 6. The spec table should read:
-//   VLD.128 / VST.128 | 6 | +3 for LSU state machine + 1 for lsu_req
-//                         | registration delay
-// Update the ISA spec when this file is updated.
+// WHY LSU_LATCH IS NEEDED:
+// Both helix_picosoc_mem and the simulation testbench use registered (synchronous)
+// vector reads: vec_rdata <= mem[addr] at posedge clk when vec_en=1.
+// When the LSU is in LSU_WAIT, vec_mem_en=1 is already asserted (set at
+// LSU_ACCESS). At the LSU_WAIT posedge, two things fire simultaneously:
+//   - SRAM:  vec_mem_rdata <= mem[addr]  (NBA, updates AFTER this posedge)
+//   - LSU:   lsu_rdata <= vec_mem_rdata  (NBA, reads PRE-posedge value)
+// Due to NBA semantics the LSU reads the stale pre-update value.
+// LSU_LATCH adds one cycle so lsu_rdata is captured AFTER the SRAM NBA settles.
 //
-// DESIGN NOTE — lsu_done is combinational:
-// Making lsu_done a registered output (lsu_done <= 1'b1 in LSU_DONE state)
-// adds one extra clock: vcop sees lsu_done one cycle after LSU enters LSU_DONE,
-// then needs another cycle to transition S_LSU→S_DONE. That would be 7 total
-// stall cycles. By making lsu_done combinational from state == LSU_DONE, vcop
-// sees it in the same cycle LSU_DONE is entered, saving one clock.
-//
-// lsu_done is held for exactly one clock (the LSU_DONE cycle), then LSU
-// transitions back to LSU_IDLE. vcop must be in S_LSU and checking lsu_done
-// every cycle — this is guaranteed by the vcop state machine design.
+// ISA SPEC: VLD/VST stall cycles = 7 (updated from earlier incorrect 6/5).
 // =============================================================================
 
 `include "helix_vec_defs.svh"
@@ -65,11 +65,13 @@ module helix_vec_lsu #(
     input  logic [VLEN-1:0]   vec_mem_rdata
 );
 
-    typedef enum logic [1:0] {
-        LSU_IDLE   = 2'b00,
-        LSU_ACCESS = 2'b01,
-        LSU_WAIT   = 2'b10,
-        LSU_DONE   = 2'b11
+    // 5-state machine requires 3-bit encoding.
+    typedef enum logic [2:0] {
+        LSU_IDLE   = 3'b000,
+        LSU_ACCESS = 3'b001,
+        LSU_WAIT   = 3'b010,
+        LSU_LATCH  = 3'b011,   // NEW: capture lsu_rdata after SRAM NBA settles
+        LSU_DONE   = 3'b100
     } lsu_state_t;
 
     lsu_state_t  state;
@@ -79,11 +81,8 @@ module helix_vec_lsu #(
 
     // =========================================================================
     // lsu_done: combinational from state register.
-    // FIX: previously registered (lsu_done <= 1'b1 inside always_ff).
-    // Registered lsu_done added two extra clocks: vcop saw lsu_done one cycle
-    // after LSU_DONE was entered, then took another cycle to reach S_DONE.
-    // Combinational lsu_done is seen by vcop in the same cycle LSU_DONE is
-    // entered, saving one clock and making the 6-cycle total consistent.
+    // vcop sees it in the same cycle LSU enters LSU_DONE — no extra registered
+    // cycle needed.
     // =========================================================================
     assign lsu_done = (state == LSU_DONE);
 
@@ -94,7 +93,7 @@ module helix_vec_lsu #(
             vec_mem_we <= 1'b0;
             lsu_rdata  <= '0;
         end else begin
-            vec_mem_en <= 1'b0;
+            vec_mem_en <= 1'b0;   // default: deassert each cycle
 
             case (state)
                 LSU_IDLE: begin
@@ -107,6 +106,9 @@ module helix_vec_lsu #(
                 end
 
                 LSU_ACCESS: begin
+                    // Assert vec_mem_en. SRAM latches addr+en at this posedge
+                    // (via NBA). At the NEXT posedge (LSU_WAIT), the SRAM will
+                    // update vec_mem_rdata.
                     vec_mem_en    <= 1'b1;
                     vec_mem_we    <= is_store_r;
                     vec_mem_addr  <= addr_r;
@@ -115,15 +117,24 @@ module helix_vec_lsu #(
                 end
 
                 LSU_WAIT: begin
-                    // Synchronous SRAM: rdata valid this cycle
+                    // At this posedge: SRAM fires (sees vec_mem_en=1) and
+                    // updates vec_mem_rdata via NBA. We do NOT capture here
+                    // because the LSU and SRAM both use NBA — reading now would
+                    // see the pre-update value. Transition to LSU_LATCH instead.
+                    state <= LSU_LATCH;
+                end
+
+                LSU_LATCH: begin
+                    // vec_mem_rdata is now stable: it was updated by the SRAM's
+                    // NBA at the previous (LSU_WAIT) posedge. Safe to capture.
                     if (!is_store_r)
                         lsu_rdata <= vec_mem_rdata;
                     state <= LSU_DONE;
                 end
 
-                // lsu_done is asserted combinationally while in this state.
-                // Transition immediately back to IDLE so lsu_done is a
-                // single-cycle pulse — vcop checks it every cycle in S_LSU.
+                // lsu_done asserted combinationally this cycle.
+                // vcop S_LSU sees it, writes Q register, moves to S_DONE.
+                // Transition back to LSU_IDLE immediately.
                 LSU_DONE: begin
                     state <= LSU_IDLE;
                 end
