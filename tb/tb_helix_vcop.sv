@@ -116,7 +116,21 @@ module tb_helix_vcop;
     endfunction
 
     // =========================================================================
-    // BFM: issue one instruction, wait for completion, deassert
+    // BFM: issue one instruction, wait for completion, deassert.
+    //
+    // FIX: removed the extra @(posedge clk) after the while loop.
+    // Previously: while exits at posedge A (pcpi_ready=1), then waits one
+    // more posedge (A+1) before deasserting pcpi_valid. At A+1 the DUT
+    // is in S_IDLE and sees pcpi_valid still high, re-entering S_DECODE
+    // and executing the same instruction a second time. For VMAC this
+    // doubled ACCX; for arithmetic it was harmless but still wrong.
+    //
+    // Fix: deassert pcpi_valid at posedge A via NBA. DUT transitions
+    // S_DONE→S_IDLE at A. At A+1, pcpi_valid=0, no re-entry.
+    //
+    // pcpi_rd/pcpi_wr are read correctly: task returns in the active region
+    // of posedge A, before NBA clears pcpi_ready. The combinational signals
+    // still reflect state=S_DONE at that point.
     // =========================================================================
     task automatic issue(input logic [31:0] insn, input logic [31:0] rs1, rs2);
         @(posedge clk);
@@ -125,8 +139,7 @@ module tb_helix_vcop;
         pcpi_rs1   <= rs1;
         pcpi_rs2   <= rs2;
         while (!pcpi_ready) @(posedge clk);
-        @(posedge clk);
-        pcpi_valid <= 1'b0;
+        pcpi_valid <= 1'b0;   // deassert same cycle pcpi_ready seen — no extra cycle
         pcpi_insn  <= '0;
     endtask
 
