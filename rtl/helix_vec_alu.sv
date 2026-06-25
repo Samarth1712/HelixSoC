@@ -54,10 +54,22 @@ module helix_vec_alu #(
     // FIX: sat_sub widened to 9 bits to handle b=INT_MIN correctly.
     // Old: sat_add(a, ~b+1) — fails when b=0x80 because ~0x80+1=0x80 (overflow).
     // New: sign-extend both to 9 bits, subtract, saturate.
+    //
+    // FIX: positive saturation condition changed from s[8] to s[7] (and
+    // analogously s[16]→s[15], s[32]→s[31] for wider widths).
+    //
+    // s is the (N+1)-bit sign-extended sum. For positive inputs (a[N-1]=b[N-1]=0),
+    // sign extension gives 0_xxxxxxx, so the max sum is 2*(2^(N-1)-1) = 2^N - 2,
+    // which fits in N bits — s[N] (carry out) is ALWAYS 0 for positive inputs.
+    // Positive saturation using s[N] therefore NEVER fires.
+    //
+    // The correct check is s[N-1]: the MSB of the N-bit result. When both
+    // inputs are positive but the N-bit result has MSB=1 (appears negative),
+    // signed overflow occurred and we must saturate to INT_MAX.
     function automatic logic [7:0] sat_add_s8(input logic [7:0] a, b);
         logic [8:0] s;
         s = {a[7], a} + {b[7], b};
-        if      (!a[7] && !b[7] &&  s[8]) return 8'h7F;
+        if      (!a[7] && !b[7] &&  s[7]) return 8'h7F;   // was s[8] — always 0 for +inputs
         else if ( a[7] &&  b[7] && !s[7]) return 8'h80;
         else                               return s[7:0];
     endfunction
@@ -79,7 +91,7 @@ module helix_vec_alu #(
     function automatic logic [15:0] sat_add_s16(input logic [15:0] a, b);
         logic [16:0] s;
         s = {a[15], a} + {b[15], b};
-        if      (!a[15] && !b[15] &&  s[16]) return 16'h7FFF;
+        if      (!a[15] && !b[15] &&  s[15]) return 16'h7FFF;  // was s[16]
         else if ( a[15] &&  b[15] && !s[15]) return 16'h8000;
         else                                  return s[15:0];
     endfunction
@@ -101,7 +113,7 @@ module helix_vec_alu #(
     function automatic logic [31:0] sat_add_s32(input logic [31:0] a, b);
         logic [32:0] s;
         s = {a[31], a} + {b[31], b};
-        if      (!a[31] && !b[31] &&  s[32]) return 32'h7FFF_FFFF;
+        if      (!a[31] && !b[31] &&  s[31]) return 32'h7FFF_FFFF;  // was s[32]
         else if ( a[31] &&  b[31] && !s[31]) return 32'h8000_0000;
         else                                  return s[31:0];
     endfunction
@@ -308,19 +320,29 @@ module helix_vec_alu #(
     end
 
 `ifdef SIMULATION
-    // Verify sat_sub edge case at elaboration time with a one-shot check.
-    // This fires once at time-0 to confirm the function returns the correct
-    // value for the INT_MIN input that previously produced a wrong result.
+    // Verify sat_sub and sat_add edge cases at elaboration time.
     initial begin
-        // sat_sub_s8(0, INT_MIN): 0 - (-128) should saturate to +127
+        // sat_sub INT_MIN cases (previously broken with ~b+1 negation)
         assert (sat_sub_s8(8'h00, 8'h80) === 8'h7F)
             else $fatal(1, "[HVX_ALU] sat_sub_s8(0, INT_MIN) != 127 — fix broken");
-        // sat_sub_s16(0, INT_MIN)
         assert (sat_sub_s16(16'h0000, 16'h8000) === 16'h7FFF)
             else $fatal(1, "[HVX_ALU] sat_sub_s16(0, INT_MIN) != 0x7FFF — fix broken");
-        // sat_sub_s32(0, INT_MIN)
         assert (sat_sub_s32(32'h0000_0000, 32'h8000_0000) === 32'h7FFF_FFFF)
             else $fatal(1, "[HVX_ALU] sat_sub_s32(0, INT_MIN) != 0x7FFFFFFF — fix broken");
+        // sat_add positive saturation cases (previously broken with s[N] check)
+        assert (sat_add_s8(8'h64, 8'h32) === 8'h7F)
+            else $fatal(1, "[HVX_ALU] sat_add_s8(100, 50) != 127 — fix broken (s[7] vs s[8])");
+        assert (sat_add_s8(8'h7F, 8'h01) === 8'h7F)
+            else $fatal(1, "[HVX_ALU] sat_add_s8(127, 1) != 127 — fix broken");
+        assert (sat_add_s16(16'h7FFF, 16'h0001) === 16'h7FFF)
+            else $fatal(1, "[HVX_ALU] sat_add_s16(INT16_MAX, 1) != 0x7FFF — fix broken");
+        assert (sat_add_s32(32'h7FFF_FFFF, 32'h0000_0001) === 32'h7FFF_FFFF)
+            else $fatal(1, "[HVX_ALU] sat_add_s32(INT32_MAX, 1) != 0x7FFFFFFF — fix broken");
+        // Verify no-saturation cases still correct
+        assert (sat_add_s8(8'h0A, 8'h14) === 8'h1E)
+            else $fatal(1, "[HVX_ALU] sat_add_s8(10, 20) != 30 — regression");
+        assert (sat_add_s8(8'h3F, 8'h40) === 8'h7F)
+            else $fatal(1, "[HVX_ALU] sat_add_s8(63, 64) != 127 — regression");
     end
 `endif
 
