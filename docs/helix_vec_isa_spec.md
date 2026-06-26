@@ -1,15 +1,6 @@
 # Helix SoC — Vector ISA Specification
-**Version:** 1.1-draft
-**Date:** 2025
-**Opcode space:** RISC-V custom-1 (`7'b0101011` = `0x2B`)
 
-**Changelog from 1.0-draft:**
-- Section 5: VLD/VST stall cycles corrected from 5 to 6 (RTL trace confirmed)
-- Section 2: `VGETACC` scalar `rd` encoding limitation documented (x0–x7 only)
-- Section 4.2: `VSUB` INT_MIN edge case documented
-- Section 4.2: `VMULH` rounding behaviour clarified (truncation toward −∞)
-- Section 6: Canonical `ew` encoding for don't-care fields specified
-- Section 7: `CATCH_ILLINSN` requirement clarified (not required; `ENABLE_PCPI` is)
+**Opcode space:** RISC-V custom-1 (`7'b0101011` = `0x2B`)
 
 ---
 
@@ -110,13 +101,13 @@ For `VGETACC`: scalar `x[rs2]` carries the right-shift amount, passed via
 - **funct3:** `010`  **op_id:** `00000`  **ew:** `00` (canonical)
 - **Operation:** `Q[vd] = mem128[rs1 & ~0xF]`
 - **Notes:** Address forced 16-byte aligned (lower 4 bits masked). `pcpi_rs1`
-  carries the address. Stalls CPU for **6 cycles** (see Section 5).
+  carries the address. Stalls CPU for **7 cycles** (see Section 5).
 
 #### `VST.128  vs2, [rs1]`
 - **funct3:** `011`  **op_id:** `00000`  **ew:** `00` (canonical)
 - **Operation:** `mem128[rs1 & ~0xF] = Q[vs2]`
 - **Notes:** Same alignment constraint. `pcpi_rs1` = address. No Q-register
-  writeback. Stalls CPU for **6 cycles** (see Section 5).
+  writeback. Stalls CPU for **7 cycles** (see Section 5).
 
 ---
 
@@ -232,9 +223,9 @@ correction in scalar code after accumulation.
 |---|---|---|
 | ARITH / MISC | 3 | IDLE→DECODE→EXEC→DONE |
 | MAC (VMAC, VCLRACC, VGETACC) | 3 | Same pipeline |
-| VLD.128 / VST.128 | **6** | See detailed breakdown below |
+| VLD.128 / VST.128 | **7** | See detailed breakdown below |
 
-**VLD/VST cycle breakdown (6 cycles total):**
+**VLD/VST cycle breakdown (7 cycles total):**
 
 ```
 Cycle 0  vcop S_IDLE → S_DECODE   instruction and rs1/rs2 latched
@@ -242,17 +233,28 @@ Cycle 1  vcop S_DECODE             lsu_req asserted (registered);
                                    Q-register values latched
          LSU  LSU_IDLE             lsu_req not yet visible (registered)
 Cycle 2  LSU  LSU_IDLE → LSU_ACCESS addr/wdata latched, req seen
-Cycle 3  LSU  LSU_ACCESS            vec_mem_en driven; SRAM sampling inputs
-Cycle 4  LSU  LSU_WAIT              SRAM output valid; lsu_rdata captured
+Cycle 3  LSU  LSU_ACCESS            vec_mem_en asserted; SRAM latches addr
+Cycle 4  LSU  LSU_WAIT              SRAM fires: vec_mem_rdata updated via NBA.
+                                   NOT captured here — SRAM and LSU both
+                                   fire at this posedge (NBA race condition).
+Cycle 5  LSU  LSU_LATCH             vec_mem_rdata stable (settled from
+                                   cycle 4 NBA). lsu_rdata captured.
          LSU  → LSU_DONE
 Cycle 5  LSU  LSU_DONE              lsu_done asserted combinationally;
-         vcop S_LSU sees lsu_done=1 same cycle → S_DONE
-Cycle 6  vcop S_DONE                pcpi_ready asserted combinationally
+         vcop S_LSU sees lsu_done=1 same cycle → S_DONE.
+         Q register written with lsu_rdata.
+Cycle 6  vcop S_DONE                pcpi_ready asserted combinationally.
 ```
 
+**Why LSU_LATCH is needed:** at `LSU_WAIT` posedge, both the synchronous SRAM
+(`vec_mem_rdata <= mem[addr]`) and the LSU (`lsu_rdata <= vec_mem_rdata`) use
+NBA assignments at the same simulation time. Both read the pre-posedge value of
+`vec_mem_rdata`. Without `LSU_LATCH`, the LSU always loads stale data. The extra
+state costs one cycle but is required for correctness with any synchronous SRAM.
+
 The `lsu_done` signal is combinational from the LSU state register
-(`assign lsu_done = (state == LSU_DONE)`). This avoids a registered version
-that would add one extra clock (7 cycles total).
+(`assign lsu_done = (state == LSU_DONE)`), so vcop sees it immediately
+without an additional registered cycle.
 
 The core is stalled (no IPC loss for other instructions) for exactly the listed
 cycles. `pcpi_wait` is asserted from cycle 1 through cycle N−1; `pcpi_ready`
@@ -446,11 +448,11 @@ int32_t fir16_s8(const int8_t *samples, const int8_t *coeffs) {
 
 **Instruction count:** 5 instructions.
 
-**Cycle count:** 6 + 6 + 3 + 3 + 3 = **21 CPU cycles** (two VLD at 6 each,
+**Cycle count:** 7 + 7 + 3 + 3 + 3 = **23 CPU cycles** (two VLD at 7 each,
 VCLRACC + VMAC + VGETACC at 3 each).
 
 Scalar equivalent for 16 int8 multiply-accumulates: ~160 cycles (load, sign-extend,
-multiply, accumulate × 16). **~7.6× speedup.**
+multiply, accumulate × 16). **~7× speedup.**
 
 ---
 
