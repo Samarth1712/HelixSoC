@@ -11,7 +11,7 @@ coprocessor interface. No modifications to the PicoRV32 core are required.
 - 16× int8 / 8× int16 / 4× int32 SIMD lanes per instruction
 - Saturating signed arithmetic
 - 64-bit ACCX accumulator for overflow-safe dot products
-- Fixed 3-cycle latency (arithmetic), 6-cycle (load/store)
+- Fixed 3-cycle latency (arithmetic), 7-cycle (load/store)
 - Custom-1 opcode space (0x2B), no conflict with PicoRV32 IRQ instructions
 
 ## Quick Start
@@ -35,7 +35,7 @@ int32_t fir16_s8(const int8_t *samples, const int8_t *coeffs) {
 }
 ```
 
-~7.6× faster than equivalent scalar code (~160 cycles).
+~7× faster than equivalent scalar code (~160 cycles).
 
 ## Repository Layout
 
@@ -65,6 +65,7 @@ helix-soc/
 │       ├── picorv32.v         ← Vendored verbatim, do not modify
 │       ├── simpleuart.v
 │       ├── spimemio.v
+│       ├── spiflash.v
 │       └── UPSTREAM.md             ← Upstream commit hash
 │
 ├── tools/
@@ -169,5 +170,5 @@ Third-party components:
 
 ## Status
 
-v1.1-draft. RTL complete, known bugs fixed, testbench written.
-Not yet FPGA-validated.
+RTL complete, known bugs fixed, testbench written.
+FPGA-validated.
