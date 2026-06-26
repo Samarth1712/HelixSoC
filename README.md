@@ -44,7 +44,6 @@ helix-soc/
 │
 ├── README.md
 ├── LICENSE                    ← MIT
-├── CHANGELOG.md
 │
 ├── docs/
 │   ├── helix_vec_isa_spec.md  ← ISA specification (encoding, timing, ABI)
@@ -69,7 +68,7 @@ helix-soc/
 │       └── UPSTREAM.md             ← Upstream commit hash
 │
 ├── tools/
-│   └── gen_defs.py            ← Single source of truth for all encoding
+│   └── gen_defs.py            ← Source for all encoding
 │                                 constants; generates helix_vec_defs.svh
 │                                 and sw/include/helix_vec_defs.h
 │
@@ -111,7 +110,7 @@ Never edit the generated files directly. All encoding constant changes go
 in `tools/gen_defs.py`. The generator validates constants for overflow and
 conflicts before writing either file.
 
-## Known Limitations (v1)
+## Known Limitations 
 
 1. **No masking** — unlike RVV, individual lanes cannot be disabled. Tail
    handling requires scalar code or padding input to a 16-byte boundary.
@@ -165,7 +164,7 @@ are licensed under the MIT License. See [LICENSE](LICENSE).
 
 Third-party components:
 - PicoRV32 (`third_party/picorv32/`) — ISC License,
-  copyright Claire Xenia Wolf. See `third_party/picorv32/LICENSE`.
+  copyright Claire Xenia Wolf. See [LICENSE](https://github.com/YosysHQ/picorv32/blob/main/COPYING).
   No modifications made to upstream source.
 
 ## Status
