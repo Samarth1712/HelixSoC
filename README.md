@@ -155,7 +155,7 @@ Additional requirements:
 ## Third-Party Dependencies
 
 PicoRV32 (YosysHQ/picorv32) is vendored in `third_party/picorv32/`.
-Commit: 87c89a. Licensed ISC. No modifications made to upstream source.
+Commit: 87c89a. No modifications made to upstream source.
 
 ## License
 
@@ -165,7 +165,7 @@ are licensed under the MIT License. See [LICENSE](LICENSE).
 Third-party components:
 - PicoRV32 (`third_party/picorv32/`) — ISC License,
   copyright Claire Xenia Wolf. See [LICENSE](https://github.com/YosysHQ/picorv32/blob/main/COPYING).
-  No modifications made to upstream source.
+  
 
 ## Status
 
