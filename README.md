@@ -154,7 +154,7 @@ Additional requirements:
 
 ## Third-Party Dependencies
 
-PicoRV32 (YosysHQ/picorv32) is vendored in `third_party/picorv32/`.
+[PicoRV32 (YosysHQ/picorv32)](https://github.com/YosysHQ/picorv32) is vendored in `third_party/picorv32/`.
 Commit: 87c89a. No modifications made to upstream source.
 
 ## License
